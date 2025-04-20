@@ -1,6 +1,10 @@
 import os
 import subprocess
 from subprocess import check_call
+print("\ngerekli ögeler indiriliyor")
+print("\n")
+cmd0 = os.system("apt-get install aircrack-ng crunch xterm wordlists reaver pixiewps bully xterm wifite")
+cmd  = os.system("sleep 3 && clear")
 def intro():
     cmd  = os.system("clear")
     print("""
