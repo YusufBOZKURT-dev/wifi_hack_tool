@@ -44,7 +44,7 @@ def intro():
 """) 
 
 print("\nburaya secimini gir -->>")
-choice = int(input())
+choice = int(input(""))
 
 if choice == 1:
     print("interface seciniz -->>")
